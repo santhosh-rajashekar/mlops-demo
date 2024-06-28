@@ -9,7 +9,7 @@ permissions:
 jobs:
   lint_and_test:
     name: "Lint and Test Python Code"
-    runs-on: [self-hosted, Linux, X64, adp]
+    runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - name: Checkout code

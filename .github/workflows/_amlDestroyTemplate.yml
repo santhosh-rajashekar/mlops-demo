@@ -37,7 +37,7 @@ permissions:
 jobs:
   destroy:
     name: Teardown resources in ${{ inputs.environment }}
-    runs-on: [self-hosted, Linux, X64, adp]
+    runs-on: ubuntu-latest
     continue-on-error: false
     environment: ${{ inputs.environment }}
 

@@ -53,7 +53,7 @@ permissions:
 jobs:
   get_latest_model:
     name: Download model from ${{ inputs.environment_source }}
-    runs-on: [self-hosted, Linux, X64, adp]
+    runs-on: ubuntu-latest
     continue-on-error: false
     environment: ${{ inputs.environment_source }}
 
