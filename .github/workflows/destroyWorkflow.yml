@@ -1,0 +1,72 @@
+name: Destroy Resources
+on:
+  workflow_dispatch:
+    branches:
+      - main
+    inputs:
+      env_name:
+        description: "Environment Name"
+        type: choice
+        required: true
+        options:
+        - "dev"
+        - "tst"
+        default: "dev"
+
+  # push:
+  #   branches:
+  #     - '*'
+  #   paths:
+  #     - ".github/workflows/**"
+  #     - "code/ml/**"
+
+  # pull_request:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - ".github/workflows/**"
+  #     - "code/ml/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  # lint_and_test:
+  #   name: "Code Quality Check"
+  #   uses: ./.github/workflows/_codeQuality.yml
+  #   secrets: inherit
+
+  config:
+    name: "Read Config"
+    # needs: [lint_and_test]
+    runs-on: [self-hosted, Linux, X64, adp]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set Config Variables
+        id: config_vars
+        run: |
+          config=$(cat .github/config/config.dev.json)
+          echo "environment=$(echo $config | jq -r '.environment')" >> $GITHUB_OUTPUT
+          echo "resource_group=$(echo $config | jq -r '.resource_group')" >> $GITHUB_OUTPUT
+          echo "workspace_name=$(echo $config | jq -r '.workspace_name')" >> $GITHUB_OUTPUT
+          echo "ml_online_endpoint_name=$(echo $config | jq -r '.ml_online_endpoint_name')" >> $GITHUB_OUTPUT
+    outputs:
+      environment: ${{ steps.config_vars.outputs.environment }}
+      resource_group: ${{ steps.config_vars.outputs.resource_group }}
+      workspace_name: ${{ steps.config_vars.outputs.workspace_name }}
+      ml_online_endpoint_name: ${{ steps.config_vars.outputs.ml_online_endpoint_name }}
+
+  aml_destroy_resources:
+    uses: ./.github/workflows/_amlDestroyTemplate.yml
+    name: "Destroy Resources- ${{ inputs.env_name }}"
+    needs: [config]
+    with:
+      environment: ${{ needs.config.outputs.environment }}
+      resource_group: ${{ needs.config.outputs.resource_group }}
+      workspace_name:  ${{ needs.config.outputs.workspace_name }}
+    secrets: inherit
+

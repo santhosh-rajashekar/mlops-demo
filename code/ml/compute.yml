@@ -1,0 +1,7 @@
+$schema: https://azuremlschemas.azureedge.net/latest/computeInstance.schema.json 
+name: ${computeinstance_name}
+type: computeinstance
+size: ${computeinstance_size}
+idle_time_before_shutdown_minutes: 30
+identity:
+    type: system_assigned

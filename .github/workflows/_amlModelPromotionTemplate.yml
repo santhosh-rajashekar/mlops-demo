@@ -1,0 +1,160 @@
+name: Azure ML Model Promotion Template
+
+on:
+  workflow_call:
+    inputs:
+      environment_source:
+        required: true
+        type: string
+        default: "dev"
+        description: "Specifies the source environment."
+      environment_destination:
+        required: true
+        type: string
+        default: "prd"
+        description: "Specifies the destination environment."
+      job_name:
+        required: true
+        type: string
+        description: "Specifies the name of the job."
+      output_name:
+        required: false
+        type: string
+        default: best_model
+        description: "Specifies the name of the job output."
+      resource_group:
+        required: true
+        type: string
+        default: "rg-tdp-c88-dev-ext01-ml"
+        description: "Specifies the resource group of the workspace/project."
+      workspace_name:
+        required: true
+        type: string
+        default: "mlw-tdp-c88-dev-ext01"
+        description: "Specifies the name of the workspace/project."
+    secrets:
+      TENANT_ID:
+        required: true
+        description: "Specifies the tenant id of the deployment."
+      CLIENT_ID:
+        required: true
+        description: "Specifies the client id."
+      CLIENT_SECRET:
+        required: true
+        description: "Specifies the client secret."
+      SUBSCRIPTION_ID:
+        required: true
+        description: "Specifies the client id."
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get_latest_model:
+    name: Download model from ${{ inputs.environment_source }}
+    runs-on: [self-hosted, Linux, X64, adp]
+    continue-on-error: false
+    environment: ${{ inputs.environment_source }}
+
+    steps:
+      # Check Out Repository
+      - name: Check Out Repository
+        id: checkout_repository
+        uses: actions/checkout@v4
+
+      # Login to Azure
+      - name: Azure Login
+        id: azure_login
+        uses: azure/login@v1
+        with:
+          creds:  '{"clientId":"${{ secrets.CLIENT_ID }}","clientSecret":"${{ secrets.CLIENT_SECRET }}","subscriptionId":"${{ secrets.SUBSCRIPTION_ID }}","tenantId":"${{ secrets.TENANT_ID }}"}'
+          enable-AzPSSession: true
+
+      # Install ML extension
+      - name: Install ML Extension
+        id: aml_install
+        run: |
+          az extension add -n ml
+
+      # Download Model
+      - name: Download Model
+        id: aml_model_download
+        run: |
+          mkdir "${{ github.workspace }}/download/" -p
+          mkdir "${{ github.workspace }}/model/" -p
+
+          az ml job download \
+            --resource-group ${{ inputs.resource_group }} \
+            --workspace-name ${{ inputs.workspace_name }} \
+            --name ${{ inputs.job_name }} \
+            --output-name ${{ inputs.output_name }} \
+            --download-path ${{ github.workspace }}/download/
+
+          cp -avr "${{ github.workspace }}/download/named-outputs/${{ inputs.output_name }}/"* "${{ github.workspace }}/model"
+
+      # Create Artifact
+      - name: Create Artifact
+        id: artifact_create
+        uses: actions/upload-artifact@v3
+        with:
+          name: model
+          path: ${{ github.workspace }}/model/
+
+      # Log out from Azure
+      - name: Log out from Azure
+        id: azure_logout
+        run: |
+          az logout
+
+  register_model:
+    name: Upload model to ${{ inputs.environment_destination }}
+    runs-on: [self-hosted, Linux, X64, adp]
+    continue-on-error: false
+    environment: ${{ inputs.environment_destination }}
+    #environment: ${{ inputs.environment_source }}
+    needs: [get_latest_model]
+
+    steps:
+      # Check Out Repository
+      - name: Check Out Repository
+        id: checkout_repository
+        uses: actions/checkout@v4
+
+      # Login to Azure
+      - name: Azure Login
+        id: azure_login
+        uses: azure/login@v1
+        with:
+          creds:  '{"clientId":"${{ secrets.CLIENT_ID }}","clientSecret":"${{ secrets.CLIENT_SECRET }}","subscriptionId":"${{ secrets.SUBSCRIPTION_ID }}","tenantId":"${{ secrets.TENANT_ID }}"}'
+          enable-AzPSSession: true
+
+      # Install ML extension
+      - name: Install ML Extension
+        id: aml_install
+        run: |
+          az extension add -n ml
+
+      # Download Artifact
+      - name: Download ARtifact
+        id: artifact_download
+        uses: actions/download-artifact@v3
+        with:
+          name: model
+          path: ${{ github.workspace }}/model/
+
+      # Register Model
+      - name: Register Model
+        id: aml_model_register
+        run: |
+          az ml model create \
+            --resource-group ${{ inputs.resource_group }} \
+            --workspace-name ${{ inputs.workspace_name }} \
+            --file ${{ github.workspace }}/code/ml/model/model.yml \
+            --tags source_job=${{ inputs.job_name }} source_output=${{ inputs.output_name }}
+
+      # Log out from Azure
+      - name: Log out from Azure
+        id: azure_logout
+        run: |
+          az logout

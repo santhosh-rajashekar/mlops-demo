@@ -1,0 +1,126 @@
+name: Azure ML Deployment Template
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: "Specifies the environment of the deployment."
+      resource_group:
+        required: true
+        type: string
+        description: "Specifies the resource group of the workspace/project."
+      workspace_name:
+        required: true
+        type: string
+        description: "Specifies the name of the workspace/project."
+      ml_online_endpoint_name:
+        required: true
+        type: string
+        description: "Specifies the name of the endpoint."   
+    secrets:
+      TENANT_ID:
+        required: true
+        description: "Specifies the tenant id of the deployment."
+      CLIENT_ID:
+        required: true
+        description: "Specifies the client id."
+      CLIENT_SECRET:
+        required: true
+        description: "Specifies the client secret."
+      SUBSCRIPTION_ID:
+        required: true
+        description: "Specifies the client id."
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Model in ${{ inputs.environment }}
+    runs-on: [self-hosted, Linux, X64, adp]
+    continue-on-error: false
+    environment: ${{ inputs.environment }}
+
+    steps:
+      # Check Out Repository
+      - name: Check Out Repository
+        id: checkout_repository
+        uses: actions/checkout@v4
+
+      # Login to Azure
+      - name: Azure Login
+        id: azure_login
+        uses: azure/login@v1
+        with:
+          creds:  '{"clientId":"${{ secrets.CLIENT_ID }}","clientSecret":"${{ secrets.CLIENT_SECRET }}","subscriptionId":"${{ secrets.SUBSCRIPTION_ID }}","tenantId":"${{ secrets.TENANT_ID }}"}'
+          enable-AzPSSession: true
+
+      # Install ML extension
+      - name: Install ML Extension
+        id: aml_install
+        run: |
+          az extension add -n ml
+
+      # Check if endpoint exists
+      - name: Check if AML endpoint exists
+        id: check_endpoint
+        run: |        
+          if az ml online-endpoint show --name ${{ inputs.ml_online_endpoint_name }} --resource-group ${{ inputs.resource_group }} --workspace-name  ${{ inputs.workspace_name }} > /dev/null 2>&1; then
+            echo "Endpoint exists"
+            echo "exists=true" >> $GITHUB_ENV
+          else
+            echo "Endpoint does not exist"
+            echo "exists=false" >> $GITHUB_ENV
+          fi
+
+      # Create Deployment
+      - name: Create Online Endpoint
+        id: aml_create_managed_online_endpoint
+        if: env.exists == 'false'
+        run: |
+          DEPLOYMENT_NAME=dep-${BASE_NAME:0:28}
+          az ml online-endpoint create \
+            --resource-group ${{ inputs.resource_group }} \
+            --workspace-name ${{ inputs.workspace_name }} \
+            --file ${{ github.workspace }}/code/ml/score-online/endpoint.yml
+          
+          STUDIO_URL=$(az ml job show --name $DEPLOYMENT_NAME --workspace-name ${{ inputs.workspace_name }} --resource-group ${{ inputs.resource_group }} --query services.Studio.endpoint | jq -r)
+
+          echo "studio_url=$STUDIO_URL" >> $GITHUB_OUTPUT
+          echo "job_name=$JOB_NAME" >> $GITHUB_OUTPUT       
+        env:
+          BASE_NAME: "${{ github.run_attempt }}-${{ github.sha }}"
+
+      # Deploy to Online Deployment
+      - name: Deploy to Online Deployment
+        id: aml_online_deployment
+        run: |
+          DEPLOYMENT_NAME=dep-${BASE_NAME:0:28}         
+          az ml online-deployment create \
+            --resource-group ${{ inputs.resource_group }} \
+            --workspace-name ${{ inputs.workspace_name }} \
+            --endpoint-name ${{ inputs.ml_online_endpoint_name }} \
+            --name $DEPLOYMENT_NAME \
+            --file ${{ github.workspace }}/code/ml/score-online/deployment.yml \
+            --all-traffic
+        env:
+          BASE_NAME: "${{ github.run_attempt }}-${{ github.sha }}"
+
+      # Invoke Online Deployment
+      - name: Invoke Online Deployment
+        id: aml_online_endpoint_invoke
+        run: |
+          az ml online-endpoint invoke \
+            --resource-group ${{ inputs.resource_group }} \
+            --workspace-name ${{ inputs.workspace_name }} \
+            --name ${{ inputs.ml_online_endpoint_name }} \
+            --request-file ${{ github.workspace }}/code/ml/score-online/sample-request.json
+
+      # Log out from Azure
+      - name: Log out from Azure
+        id: azure_logout
+        run: |
+          az logout

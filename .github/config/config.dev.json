@@ -1,0 +1,15 @@
+{
+    "environment": "dev",
+    "resource_group": "rg-tdp-945-dev-ext01-ml",
+    "workspace_name": "aipr-tdp-945-dev",
+    "ml_online_endpoint_name": "online-endpoint-diabetes",
+    "tracking_uri": "azureml://149460c7-567c-4ff8-b122-bd6c4d6c8e92.workspace.westeurope.api.azureml.ms/mlflow/v1.0/subscriptions/827f04e2-b0fa-4d07-ae8c-cd12bf5e74a2/resourceGroups/rg-tdp-945-dev-ext01-ml/providers/Microsoft.MachineLearningServices/workspaces/aipr-tdp-945-dev",
+    "default_datastore": "datalakeworkspace",
+    "dataset_name": "diabetes_mltable",
+    "dataset_version": 1,
+    "default_compute": "serverless",
+    "compute": "serverless",
+    "computeinstance_name": "serverless",
+    "computeinstance_size": "STANDARD_DS3_v2",
+    "compute_needs_an_update": "false"
+}

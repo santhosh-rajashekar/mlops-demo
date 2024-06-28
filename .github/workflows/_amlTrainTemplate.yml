@@ -1,0 +1,184 @@
+name: Azure ML Training Template
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        default: "dev"
+        description: "Specifies the environment of the deployment."
+      resource_group:
+        required: true
+        type: string
+        description: "Specifies the resource group of the workspace/project."
+      workspace_name:
+        required: true
+        type: string
+        description: "Specifies the name of the workspace/project."
+    secrets:
+      TENANT_ID:
+        required: true
+        description: "Specifies the tenant id of the deployment."
+      CLIENT_ID:
+        required: true
+        description: "Specifies the client id."
+      CLIENT_SECRET:
+        required: true
+        description: "Specifies the client secret."
+      SUBSCRIPTION_ID:
+        required: true
+        description: "Specifies the client id."
+    outputs:
+      job_name:
+        description: "The name of the machine learning job."
+        value: ${{ jobs.train.outputs.job_name }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  train:
+    name: Train model in ${{ inputs.environment }}
+    runs-on: [self-hosted, Linux, X64, adp]
+    continue-on-error: false
+    environment: ${{ inputs.environment }}
+    outputs:
+      job_name: ${{ steps.aml_job.outputs.job_name }}
+
+    steps:
+      # Check Out Repository
+      - name: Check Out Repository
+        id: checkout_repository
+        uses: actions/checkout@v4
+    
+      - name: Set Config Variables
+        id: config_vars
+        run: |
+          config=$(cat .github/config/config.${{ inputs.environment }}.json)
+          echo "default_datastore=$(echo $config | jq -r '.default_datastore')" >> $GITHUB_ENV
+          echo "default_compute=$(echo $config | jq -r '.default_compute')" >> $GITHUB_ENV
+          echo "compute=$(echo $config | jq -r '.compute')" >> $GITHUB_ENV
+          echo "tracking_uri=$(echo $config | jq -r '.tracking_uri')" >> $GITHUB_ENV
+          echo "dataset_name=$(echo $config | jq -r '.dataset_name')" >> $GITHUB_ENV
+          echo "dataset_version=$(echo $config | jq -r '.dataset_version')" >> $GITHUB_ENV
+          echo "computeinstance_name=$(echo $config | jq -r '.computeinstance_name')" >> $GITHUB_ENV
+          echo "computeinstance_size=$(echo $config | jq -r '.computeinstance_size')" >> $GITHUB_ENV
+          echo "compute_needs_an_update=$(echo $config | jq -r '.compute_needs_an_update')" >> $GITHUB_ENV
+
+      - name: Update Pipeline YAML file
+        id: update_pipeline_yaml_from_confg
+        run: |
+            sed -i -e 's|${default_datastore}|${{ env.default_datastore }}|g' \
+            -e 's|${default_compute}|${{ env.default_compute }}|g' \
+            -e 's|${compute}|${{ env.compute }}|g' \
+            -e 's|${tracking_uri}|${{ env.tracking_uri }}|g' \
+            -e 's|${dataset_name}|${{ env.dataset_name }}|g' \
+            -e 's|${dataset_version}|${{ env.dataset_version }}|g' code/ml/pipeline-train.yml
+            cat code/ml/pipeline-train.yml
+
+      - name: Update Compute YAML file
+        id: update_compute_yaml_from_confg
+        run: |
+            sed -i 's|${computeinstance_size}|${{ env.computeinstance_size }}|g' code/ml/compute.yml
+            sed -i 's|${computeinstance_name}|${{ env.computeinstance_name }}|g' code/ml/compute.yml
+            cat code/ml/compute.yml
+
+      # Login to Azure
+      - name: Azure Login
+        id: azure_login
+        uses: azure/login@v1
+        with:
+          creds:  '{"clientId":"${{ secrets.CLIENT_ID }}","clientSecret":"${{ secrets.CLIENT_SECRET }}","subscriptionId":"${{ secrets.SUBSCRIPTION_ID }}","tenantId":"${{ secrets.TENANT_ID }}"}'
+          enable-AzPSSession: true
+
+      # Install ML extension
+      - name: Install ML Extension
+        id: aml_install
+        run: |
+          az extension add -n ml
+
+      # Check Dataset presence
+      - name: Check Dataset Presence
+        id: check_dataset
+        run: |
+          dataset_exists=$(az ml data show \
+          --name diabetes_mltable \
+          --resource-group ${{ inputs.resource_group }} \
+          --workspace-name ${{ inputs.workspace_name }} \
+          --version 1 \
+          --output tsv \
+          --query 'name' || echo '')
+          echo "dataset_exists=$dataset_exists" >> $GITHUB_ENV
+
+      # Create Dataset
+      - name: Create Dataset
+        id: aml_dataset
+        run: |
+          if [ -z "${{ env.dataset_exists }}" ]; then
+            az ml data create \
+              --resource-group ${{ inputs.resource_group }} \
+              --workspace-name ${{ inputs.workspace_name }} \
+              --file ${{ github.workspace }}/code/ml/data/diabetes_mltable.yml
+          fi
+
+      # Check Compute presence
+      # - name: Check Compute Presence
+      #   id: check_if_compute_exists
+      #   run: |
+      #     compute_exists=$(az ml compute show \
+      #     --name ml-demo-compute-instance \
+      #     --resource-group ${{ inputs.resource_group }} \
+      #     --workspace-name ${{ inputs.workspace_name }} \
+      #     --output tsv \
+      #     --query 'name' || echo '')
+      #     echo "compute_exists=$compute_exists" >> $GITHUB_ENV
+
+      # Create Compute
+      # - name: Create Compute
+      #   id: create_compute
+      #   run: |
+      #     if [ -z "${{ env.compute_exists }}" ]; then
+      #       az ml compute create \
+      #         --resource-group ${{ inputs.resource_group }} \
+      #         --workspace-name ${{ inputs.workspace_name }} \
+      #         --file ${{ github.workspace }}/code/ml/compute.yml
+      #     fi
+      #   env:
+      #     JOB_NAME: "Job-${{ github.sha }}"
+        
+        # Update Compute If Exists
+      # - name: Update Compute
+      #   id: update_compute
+      #   run: |
+      #     if [ -n "${{ env.compute_exists }}" ] && [ "${{ env.compute_needs_an_update }}" = "true" ]; then
+      #       az ml compute update \
+      #       --name ml-demo-compute-instance \
+      #       --resource-group ${{ inputs.resource_group }} \
+      #       --workspace-name ${{ inputs.workspace_name }} \
+      #       --identity-type SystemAssigned
+      #     fi
+      #   env:
+      #     JOB_NAME: "Job-${{ github.sha }}"
+        
+        # Create Job
+      - name: Create Job
+        id: aml_job
+        run: |
+          cat ${{ github.workspace }}/code/ml/pipeline-train.yml
+          az ml job create \
+            --resource-group ${{ inputs.resource_group }} \
+            --workspace-name ${{ inputs.workspace_name }} \
+            --name $JOB_NAME \
+            --file ${{ github.workspace }}/code/ml/pipeline-train.yml \
+            --stream
+          echo "::set-output name=job_name::$JOB_NAME"
+        env:
+          JOB_NAME: "Job-${{ github.sha }}"
+
+      # Log out from Azure
+      - name: Log out from Azure
+        id: azure_logout
+        run: |
+          az logout

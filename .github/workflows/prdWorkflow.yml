@@ -1,0 +1,52 @@
+name: Prod Deployment
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - ".github/workflows/**"
+  #     - "code/ml/**"
+
+  # pull_request:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - ".github/workflows/**"
+  #     - "code/ml/**"
+
+jobs:
+  config:
+    name: "Read Config"
+    runs-on: [self-hosted, Linux, X64, adp]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set Config Variables
+        id: config_vars
+        run: |
+          config=$(cat .github/config/config.prd.json)
+          echo "environment=$(echo $config | jq -r '.environment')" >> $GITHUB_OUTPUT
+          echo "resource_group=$(echo $config | jq -r '.resource_group')" >> $GITHUB_OUTPUT
+          echo "workspace_name=$(echo $config | jq -r '.workspace_name')" >> $GITHUB_OUTPUT
+          echo "ml_online_endpoint_name=$(echo $config | jq -r '.ml_online_endpoint_name')" >> $GITHUB_OUTPUT
+    outputs:
+      environment: ${{ steps.config_vars.outputs.environment }}
+      resource_group: ${{ steps.config_vars.outputs.resource_group }}
+      workspace_name: ${{ steps.config_vars.outputs.workspace_name }}
+      ml_online_endpoint_name: ${{ steps.config_vars.outputs.ml_online_endpoint_name }}
+
+  aml_deploy_prd:
+    uses: ./.github/workflows/_amlDeployTemplate.yml
+    needs: [config]
+    name: "AML Deploy-to-Prd"
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    with:
+      environment: "prd"
+      resource_group: ${{ needs.config.outputs.resource_group }}
+      workspace_name:  ${{ needs.config.outputs.workspace_name }}
+      ml_online_endpoint_name:  ${{ needs.config.outputs.ml_online_endpoint_name }}
+    secrets: inherit

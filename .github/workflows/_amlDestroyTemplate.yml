@@ -1,0 +1,151 @@
+name: Azure ML Destroy Resources Template
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: "Specifies the environment of the deployment."
+      resource_group:
+        required: true
+        type: string
+        description: "Specifies the resource group of the workspace/project."
+      workspace_name:
+        required: true
+        type: string
+        description: "Specifies the name of the workspace/project."
+    secrets:
+      TENANT_ID:
+        required: true
+        description: "Specifies the tenant id of the deployment."
+      CLIENT_ID:
+        required: true
+        description: "Specifies the client id."
+      CLIENT_SECRET:
+        required: true
+        description: "Specifies the client secret."
+      SUBSCRIPTION_ID:
+        required: true
+        description: "Specifies the client id."
+
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    name: Teardown resources in ${{ inputs.environment }}
+    runs-on: [self-hosted, Linux, X64, adp]
+    continue-on-error: false
+    environment: ${{ inputs.environment }}
+
+    steps:
+      # Check Out Repository
+      - name: Check Out Repository
+        id: checkout_repository
+        uses: actions/checkout@v4
+    
+      - name: Set Config Variables
+        id: config_vars
+        run: |
+          config=$(cat .github/config/config.${{ inputs.environment }}.json)
+          echo "default_datastore=$(echo $config | jq -r '.default_datastore')" >> $GITHUB_ENV
+          echo "default_compute=$(echo $config | jq -r '.default_compute')" >> $GITHUB_ENV
+          echo "compute=$(echo $config | jq -r '.compute')" >> $GITHUB_ENV
+          echo "tracking_uri=$(echo $config | jq -r '.tracking_uri')" >> $GITHUB_ENV
+          echo "dataset_name=$(echo $config | jq -r '.dataset_name')" >> $GITHUB_ENV
+          echo "dataset_version=$(echo $config | jq -r '.dataset_version')" >> $GITHUB_ENV
+          echo "computeinstance_name=$(echo $config | jq -r '.computeinstance_name')" >> $GITHUB_ENV
+          echo "computeinstance_size=$(echo $config | jq -r '.computeinstance_size')" >> $GITHUB_ENV
+          echo "compute_needs_an_update=$(echo $config | jq -r '.compute_needs_an_update')" >> $GITHUB_ENV
+
+      # Login to Azure
+      - name: Azure Login
+        id: azure_login
+        uses: azure/login@v1
+        with:
+          creds:  '{"clientId":"${{ secrets.CLIENT_ID }}","clientSecret":"${{ secrets.CLIENT_SECRET }}","subscriptionId":"${{ secrets.SUBSCRIPTION_ID }}","tenantId":"${{ secrets.TENANT_ID }}"}'
+          enable-AzPSSession: true
+
+      # Install ML extension
+      - name: Install ML Extension
+        id: aml_install
+        run: |
+          az extension add -n ml
+
+      # Check if endpoint exists
+      - name: Check if AML endpoint exists
+        id: check_endpoint
+        run: |        
+          if az ml online-endpoint show --name ${{ inputs.ml_online_endpoint_name }} --resource-group ${{ inputs.resource_group }} --workspace-name  ${{ inputs.workspace_name }} > /dev/null 2>&1; then
+            echo "Endpoint exists"
+            echo "exists=true" >> $GITHUB_ENV
+          else
+            echo "Endpoint does not exist"
+            echo "exists=false" >> $GITHUB_ENV
+          fi
+
+        # Delete Online Deployment
+      - name: Delete Online Endpoint
+        id: aml_delete_managed_online_endpoint
+        if: ${{ env.exists == 'true' }}
+        run: |
+          az ml online-endpoint delete \
+            --resource-group ${{ inputs.resource_group }} \
+            --workspace-name ${{ inputs.workspace_name }} \
+            --yes
+
+        # Check Compute presence
+      - name: Check Compute Presence
+        id: check_if_compute_exists
+        run: |
+          compute_exists=$(az ml compute show \
+          --name ml-demo-compute-instance \
+          --resource-group ${{ inputs.resource_group }} \
+          --workspace-name ${{ inputs.workspace_name }} \
+          --output tsv \
+          --query 'name' || echo '')
+          echo "compute_exists=$compute_exists" >> $GITHUB_ENV
+
+        # Delete Compute
+      - name: Delete Compute
+        id: delete_compute
+        run: |
+          if [ -n "${{ env.compute_exists }}" ]; then
+            az ml compute delete \
+              --resource-group ${{ inputs.resource_group }} \
+              --workspace-name ${{ inputs.workspace_name }} \
+              --yes
+          fi
+
+      # Check Dataset presence
+      - name: Check Dataset Presence
+        id: check_dataset
+        run: |
+          dataset_exists=$(az ml data show \
+          --name diabetes_mltable \
+          --resource-group ${{ inputs.resource_group }} \
+          --workspace-name ${{ inputs.workspace_name }} \
+          --version 1 \
+          --output tsv \
+          --query 'name' || echo '')
+          echo "dataset_exists=$dataset_exists" >> $GITHUB_ENV
+
+      # Archive Dataset
+      - name: Archive Dataset
+        id: aml_archive_dataset
+        run: |
+          if [ -n "${{ env.dataset_exists }}" ]; then
+            az ml data archive \
+              --resource-group ${{ inputs.resource_group }} \
+              --workspace-name ${{ inputs.workspace_name }} \
+              --name ${{ env.dataset_name }}
+          fi
+      
+      # Log out from Azure
+      - name: Log out from Azure
+        id: azure_logout
+        run: |
+          az logout

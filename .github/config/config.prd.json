@@ -1,0 +1,15 @@
+{
+  "environment": "prd",
+  "resource_group": "rg-tdp-351-dev-ext01-ml",
+  "workspace_name": "mlw-tdp-351-dev-ext01",
+  "ml_online_endpoint_name": "online-endpoint-diabetes-prd",
+  "tracking_uri": "azureml://b9d648f9-84e2-4d64-9998-d3440aec0d4c.workspace.westeurope.api.azureml.ms/mlflow/v1.0/subscriptions/827f04e2-b0fa-4d07-ae8c-cd12bf5e74a2/resourceGroups/rg-tdp-351-dev-ext01-ml/providers/Microsoft.MachineLearningServices/workspaces/mlw-tdp-351-dev-ext01",
+  "default_datastore": "workspaceblobstore",
+  "dataset_name": "diabetes_mltable",
+  "dataset_version": 1,
+  "default_compute": "ml-demo-compute-instance",
+  "compute": "ml-demo-compute-instance",
+  "computeinstance_name": "ml-demo-compute-instance",
+  "computeinstance_size": "STANDARD_DS3_v2",
+  "compute_needs_an_update": "false"
+}

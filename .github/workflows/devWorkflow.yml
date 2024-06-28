@@ -1,0 +1,84 @@
+name: Dev Deployment
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - 'feature-test-aiprojet-945'
+    paths:
+      - ".github/workflows/**"
+      - "code/ml/**"
+
+  # pull_request:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - ".github/workflows/**"
+  #     - "code/ml/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  # lint_and_test:
+  #   name: "Code Quality Check"
+  #   uses: ./.github/workflows/_codeQuality.yml
+  #   secrets: inherit
+
+  config:
+    name: "Read Config"
+    # needs: [lint_and_test]
+    runs-on: [self-hosted, Linux, X64, adp]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set Config Variables
+        id: config_vars
+        run: |
+          config=$(cat .github/config/config.dev.json)
+          echo "environment=$(echo $config | jq -r '.environment')" >> $GITHUB_OUTPUT
+          echo "resource_group=$(echo $config | jq -r '.resource_group')" >> $GITHUB_OUTPUT
+          echo "workspace_name=$(echo $config | jq -r '.workspace_name')" >> $GITHUB_OUTPUT
+          echo "ml_online_endpoint_name=$(echo $config | jq -r '.ml_online_endpoint_name')" >> $GITHUB_OUTPUT
+    outputs:
+      environment: ${{ steps.config_vars.outputs.environment }}
+      resource_group: ${{ steps.config_vars.outputs.resource_group }}
+      workspace_name: ${{ steps.config_vars.outputs.workspace_name }}
+      ml_online_endpoint_name: ${{ steps.config_vars.outputs.ml_online_endpoint_name }}
+
+  aml_training_dev:
+    uses: ./.github/workflows/_amlTrainTemplate.yml
+    name: "Train Model - Dev"
+    needs: [config]
+    with:
+      environment: ${{ needs.config.outputs.environment }}
+      resource_group: ${{ needs.config.outputs.resource_group }}
+      workspace_name:  ${{ needs.config.outputs.workspace_name }}
+    secrets: inherit
+
+  aml_deploy_dev:
+    uses: ./.github/workflows/_amlDeployTemplate.yml
+    name: "Deploy Model to Endpoint - Dev"
+    needs: [config, aml_training_dev]
+    with:
+      environment: ${{ needs.config.outputs.environment }}  
+      resource_group: ${{ needs.config.outputs.resource_group }}
+      workspace_name:  ${{ needs.config.outputs.workspace_name }}
+      ml_online_endpoint_name:  ${{ needs.config.outputs.ml_online_endpoint_name }}
+    secrets: inherit
+
+  # aml_model_promotion_dev_to_prd:
+  #   uses: ./.github/workflows/_amlModelPromotionTemplate.yml
+  #   name: "Promote Model to Registry-Prod"
+  #   needs: [config, aml_training_dev, aml_deploy_dev]
+  #   with:
+  #     environment_source: "dev"
+  #     environment_destination: "prd"
+  #     job_name: ${{ needs.aml_training_dev.outputs.job_name }}
+  #     output_name: best_model
+  #     resource_group: ${{ needs.config.outputs.resource_group }}
+  #     workspace_name:  ${{ needs.config.outputs.workspace_name }}
+  #   secrets: inherit
